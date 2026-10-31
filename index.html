@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roundrobin - the slow group letter (prototype)</title>
+<meta name="description" content="Roundrobin is an experimental prototype: a group letter that travels as a single file passed through the chat you already have. Write when you're free, read a sealed issue, no feed.">
+<meta name="google-site-verification" content="R3Jjy_NTB_Dfga_tRyby6kHTOuZl6YpTrTNB0ja5k1M" />
+<meta name="robots" content="index,follow">
+<link rel="canonical" href="https://roundrobin-demo.pages.dev/">
+<!-- DEPLOY: run set-domain.py https://your.domain/path/ before publishing. It sets the canonical URL, generates sitemap.xml and flips robots to allow indexing. Until then this page stays noindex. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebApplication","name":"Roundrobin (prototype)","applicationCategory":"SocialNetworkingApplication","isAccessibleForFree":true,"description":"Experimental prototype: a group letter that travels as a file passed through an existing chat. Local-only, no accounts."}
+</script>
+<style>
+:root{--paper:#f7f3ea;--ink:#2b2620;--muted:#8a8175;--accent:#8a5a2b;--line:#ddd3c2;--seal:#a2402f;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font-family:Georgia,'Times New Roman',serif;line-height:1.6;padding:0 16px 64px}
+.wrap{max-width:640px;margin:0 auto}
+header.masthead{text-align:center;padding:40px 0 8px;border-bottom:2px solid var(--ink);margin-bottom:8px}
+header.masthead h1{font-size:2rem;letter-spacing:.04em}
+header.masthead .tag{color:var(--muted);font-style:italic;margin-top:4px}
+.banner{background:#f0e6d2;border:1px solid var(--line);border-radius:6px;padding:10px 14px;font-size:.85rem;color:#5d5544;margin:16px 0}
+.banner b{color:var(--seal)}
+.meta{display:flex;justify-content:space-between;color:var(--muted);font-size:.85rem;padding:8px 2px;border-bottom:1px solid var(--line);margin-bottom:20px;gap:10px;flex-wrap:wrap}
+h2{font-size:1.15rem;margin:24px 0 10px}
+.issue{border:1px solid var(--line);border-radius:8px;background:#fffdf7;padding:16px 18px;margin:18px 0}
+.issue h3{font-size:.95rem;color:var(--accent);letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px}
+.entry{padding:12px 0;border-top:1px dashed var(--line)}
+.entry:first-of-type{border-top:none}
+.entry .who{font-weight:bold}
+.entry .when{color:var(--muted);font-size:.8rem;margin-left:8px}
+.entry img{max-width:100%;border-radius:6px;margin-top:8px}
+.entry .body{white-space:pre-wrap;margin-top:2px}
+form.card{border:1px solid var(--line);border-radius:8px;background:#fffdf7;padding:16px 18px;margin:22px 0}
+label{display:block;font-size:.85rem;color:var(--muted);margin:10px 0 4px}
+input[type=text],textarea,select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink);font-family:inherit;font-size:1rem}
+textarea{min-height:90px;resize:vertical}
+button{cursor:pointer;font-family:inherit;font-size:.95rem;border-radius:6px;border:1px solid var(--ink);background:var(--ink);color:var(--paper);padding:10px 18px;margin-top:14px}
+button.ghost{background:transparent;color:var(--ink)}
+button.seal{background:var(--seal);border-color:var(--seal);color:#fff}
+button:disabled{opacity:.45;cursor:default}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row button{flex:1;min-width:140px}
+.warn{background:#f8e8e4;border:1px solid #d8a99f;border-radius:6px;padding:10px 14px;font-size:.85rem;color:#6e3327;margin:14px 0}
+footer{margin-top:36px;color:var(--muted);font-size:.8rem;text-align:center}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <h1 id="app-title">Roundrobin</h1>
+  <div class="tag">the slow group letter - write when you're free, read a sealed issue, no feed</div>
+</header>
+
+<div class="banner" id="truth-banner">
+  <b>Experimental prototype.</b> This page runs entirely on your device: no account, no server upload by this page.
+  A letter travels only when a member deliberately exports the file and sends it in their own chat - there is no automatic delivery and no notification system here.
+  Sealing an issue is a reading convention, not immutability: anyone holding the file can keep editing.
+  Whatever members write travels inside the file, so pass it only to the group it belongs to.
+</div>
+
+<section id="home">
+  <form class="card" id="create-form">
+    <h2>Start a new letter</h2>
+    <label for="letter-title">Letter title</label>
+    <input type="text" id="letter-title" placeholder="The Tuesday Pages" required>
+    <label for="member-names">Members in passing order (first names, comma separated)</label>
+    <input type="text" id="member-names" placeholder="Maya, Theo, Rin" required>
+    <button type="submit">Create letter</button>
+    <button type="button" class="ghost" id="demo-btn">Try a labeled sample letter (local demo data)</button>
+  </form>
+  <form class="card" id="open-form">
+    <h2>Open a letter file you received</h2>
+    <label for="open-file">Choose the .html letter file a member sent you</label>
+    <input type="file" id="open-file" accept=".html,text/html">
+  </form>
+</section>
+
+<section id="letter" class="hidden">
+  <div class="meta"><span id="letter-heading"></span><span id="issue-count"></span></div>
+  <div class="warn hidden" id="version-warn"></div>
+  <div class="row hidden" id="import-actions">
+    <button class="ghost" id="keep-btn">Keep current letter</button>
+    <button class="ghost" id="backup-btn">Export current as backup</button>
+    <button class="seal" id="replace-btn">Import the file anyway</button>
+  </div>
+  <div id="issues"></div>
+
+  <form class="card" id="entry-form">
+    <h2>Add your entry to the open issue</h2>
+    <div class="meta" id="turn-note" style="border:none;padding:0 0 6px"></div>
+    <label for="entry-who">You are</label>
+    <select id="entry-who"></select>
+    <label for="entry-body">Your entry</label>
+    <textarea id="entry-body" placeholder="Write as much or as little as you like. The group reads it when the letter reaches them." required></textarea>
+    <label for="entry-photo">Optional photo (resized small, stored inside the file)</label>
+    <input type="file" id="entry-photo" accept="image/*">
+    <button type="submit">Add entry</button>
+  </form>
+
+  <div class="row">
+    <button class="seal" id="seal-btn">Seal this issue</button>
+    <button class="ghost" id="export-btn">Export letter file to pass on</button>
+    <button class="ghost" id="new-btn">Back to start</button>
+  </div>
+</section>
+
+<footer>Roundrobin prototype v3.1 - experimental, device-local. Built for a private research cycle; not a launched product or validated platform.</footer>
+</div>
+
+<script id="roundrobin-data" type="application/json">null</script>
+<script>
+(function(){
+"use strict";
+const $=id=>document.getElementById(id);
+let state=null; // {title, members:[], turn:int, version:int, issues:[{sealed,sealedAt,entries:[{who,body,photo,at}]}]}
+function save(){ try{ localStorage.setItem('roundrobin', JSON.stringify(state)); }catch(e){} }
+function loadLocal(){ try{ const s=localStorage.getItem('roundrobin'); return s?JSON.parse(s):null; }catch(e){ return null; } }
+function esc(s){ const d=document.createElement('div'); d.textContent=String(s); return d.innerHTML; }
+function currentIssue(){ return state.issues[state.issues.length-1]; }
+// Safe embedding: JSON.stringify does not escape a script-close tag, which would break the data block. Escape it.
+function embedJSON(s){ return JSON.stringify(s).replace(/<\//g,'<\\/'); }
+// Validate an imported letter is data of the expected shape; never trust or execute it.
+function validState(s){
+  return s && typeof s==='object' && typeof s.title==='string' && s.title.length>0 && s.title.length<200
+    && (s.id===undefined||s.id===null||typeof s.id==='string')
+    && Array.isArray(s.members) && s.members.length>0 && s.members.length<50 && s.members.every(m=>typeof m==='string'&&m.length<80)
+    && Number.isInteger(s.turn) && Number.isInteger(s.version)
+    && Array.isArray(s.issues) && s.issues.length>0 && s.issues.every(i=>i&&typeof i==='object'&&Array.isArray(i.entries)
+       && i.entries.every(e=>e&&typeof e==='object'&&typeof e.who==='string'&&typeof e.body==='string'
+          &&(e.photo===null||typeof e.photo==='string')&&(typeof e.at==='string')));
+}
+// Only allow real raster data URLs as photos; anything else is dropped.
+function safePhoto(p){ return (typeof p==='string'&&/^data:image\/(png|jpeg|jpg|gif|webp);base64,/.test(p)&&p.length<8000000)?p:null; }
+function sanitizeState(s){
+  if(typeof s.id!=='string') s.id=null;
+  s.turn=((s.turn%s.members.length)+s.members.length)%s.members.length;
+  if(s.version<1) s.version=1;
+  s.issues.forEach(i=>{ i.sealed=!!i.sealed; i.sealedAt=i.sealed?String(i.sealedAt||''):null;
+    i.entries.forEach(e=>{ e.who=String(e.who).slice(0,80); e.body=String(e.body).slice(0,20000); e.photo=safePhoto(e.photo); e.at=String(e.at); }); });
+  return s;
+}
+function rid(){ try{ const a=new Uint32Array(2); crypto.getRandomValues(a); return 'L'+a[0].toString(36)+a[1].toString(36); }catch(e){ return 'L'+Math.random().toString(36).slice(2)+Date.now().toString(36); } }
+// Fingerprint of letter CONTENT (identity + entries), not the version counter: two copies at the
+// same version can hold different entries, and equal counters never prove identical content.
+function fingerprint(s){ const str=(s.id||'')+'|'+JSON.stringify(s.issues); let h=5381; for(let i=0;i<str.length;i++){ h=((h<<5)+h+str.charCodeAt(i))>>>0; } return 'h'+h; }
+let pendingImport=null;
+function hideImportActions(){ pendingImport=null; const r=$('import-actions'); if(r) r.classList.add('hidden'); }
+function render(){
+  const home=$('home'), letter=$('letter');
+  if(!state){ home.classList.remove('hidden'); letter.classList.add('hidden'); return; }
+  home.classList.add('hidden'); letter.classList.remove('hidden');
+  $('app-title').textContent=state.title;
+  const sealed=state.issues.filter(i=>i.sealed).length;
+  $('letter-heading').textContent='Members, in passing order: '+state.members.join(' -> ');
+  $('issue-count').textContent='v'+state.version+' - '+sealed+' sealed issue'+(sealed===1?'':'s');
+  const holder=state.members[state.turn % state.members.length];
+  $('turn-note').textContent='The letter is currently with '+holder+'. Others can still write, but the convention is: holder writes, then passes it on.';
+  const box=$('issues'); box.innerHTML='';
+  state.issues.forEach((iss,idx)=>{
+    const div=document.createElement('div'); div.className='issue';
+    const h=document.createElement('h3');
+    h.textContent=iss.sealed?('Issue '+(idx+1)+' - sealed '+new Date(iss.sealedAt).toLocaleDateString()):('Issue '+(idx+1)+' - open');
+    div.appendChild(h);
+    if(iss.entries.length===0){ const p=document.createElement('p'); p.style.color='var(--muted)'; p.textContent='No entries yet.'; div.appendChild(p); }
+    iss.entries.forEach(en=>{
+      const e=document.createElement('div'); e.className='entry';
+      const who=document.createElement('span'); who.className='who'; who.textContent=en.who;
+      const when=document.createElement('span'); when.className='when'; when.textContent=new Date(en.at).toLocaleString();
+      const body=document.createElement('div'); body.className='body'; body.textContent=en.body;
+      e.appendChild(who); e.appendChild(when); e.appendChild(body);
+      if(en.photo){ const img=document.createElement('img'); img.src=en.photo; img.alt='photo from '+en.who; e.appendChild(img); }
+      div.appendChild(e);
+    });
+    box.appendChild(div);
+  });
+  const sel=$('entry-who'); sel.innerHTML='';
+  state.members.forEach(m=>{ const o=document.createElement('option'); o.value=m; o.textContent=m; sel.appendChild(o); });
+  sel.value=holder;
+  $('seal-btn').disabled=currentIssue().sealed;
+}
+function newIssue(){ return {sealed:false, sealedAt:null, entries:[]}; }
+function showWarn(msg){ const w=$('version-warn'); if(!msg){w.classList.add('hidden');return;} w.textContent=msg; w.classList.remove('hidden'); }
+$('create-form').addEventListener('submit',ev=>{
+  ev.preventDefault();
+  const title=$('letter-title').value.trim();
+  const members=$('member-names').value.split(',').map(s=>s.trim()).filter(Boolean);
+  if(!title||members.length===0) return;
+  state={id:rid(), title:title.slice(0,200), members:members.slice(0,50), turn:0, version:1, issues:[newIssue()]};
+  save(); showWarn(null); render();
+});
+$('demo-btn').addEventListener('click',()=>{
+  state={id:'demo-letter', title:'Sample letter (demo data, not real members)', members:['Maya','Theo','Rin'], turn:1, version:3, issues:[
+    {sealed:true, sealedAt:new Date(Date.now()-86400000*2).toISOString(), entries:[
+      {who:'Maya', body:'Sample entry: first issue, kicking things off. This text is placeholder demo content.', photo:null, at:new Date(Date.now()-86400000*2).toISOString()},
+      {who:'Theo', body:'Sample entry: replying a day later from another timezone.', photo:null, at:new Date(Date.now()-86400000).toISOString()}
+    ]},
+    {sealed:false, sealedAt:null, entries:[
+      {who:'Theo', body:'Sample entry: started the next issue.', photo:null, at:new Date().toISOString()}
+    ]}
+  ]};
+  save(); showWarn(null); render();
+});
+$('open-file').addEventListener('change',()=>{
+  const f=$('open-file').files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=e=>{
+    hideImportActions();
+    let imported=null;
+    const m=/<script id="roundrobin-data" type="application\/json">([\s\S]*?)<\/script>/.exec(e.target.result);
+    if(m){ try{ imported=JSON.parse(m[1]); }catch(err){ imported=null; } }
+    if(!validState(imported)){ showWarn('That file does not contain a readable Roundrobin letter. Nothing was imported; your current letter is unchanged.'); return; }
+    imported=sanitizeState(imported);
+    const cur=state||loadLocal();
+    if(!cur){ state=imported; save(); showWarn(null); render(); return; }
+    const sameIdentity = cur.id && imported.id ? (cur.id===imported.id) : (cur.title===imported.title);
+    const sameContent = fingerprint(cur)===fingerprint(imported);
+    if(sameIdentity && sameContent){
+      if(imported.version>cur.version){ cur.version=imported.version; state=cur; save(); render(); }
+      showWarn('This file has the same content as the copy already on this device. Nothing new to import.');
+      return;
+    }
+    // Any differing content requires an explicit choice - a version counter is not ancestry proof
+    // and never establishes that one copy contains the other's contributions.
+    pendingImport=imported;
+    if(sameIdentity){
+      const olderNote = imported.version<cur.version ? ' The file is also OLDER by version counter.' : (imported.version>cur.version ? ' The file has a NEWER version counter, but that does not prove it includes your local entries.' : '');
+      showWarn('CONFLICT: this file (v'+imported.version+') and the copy on this device (v'+cur.version+') belong to the same letter but contain DIFFERENT entries.'+olderNote+' Entries may be unique to either copy. Neither copy was changed. Export the current letter as a backup file if it may hold unique entries, then choose.');
+    } else {
+      showWarn('This file looks like a DIFFERENT letter than the one on this device. It was not imported. Choose below whether to keep your current letter or replace it.');
+    }
+    $('import-actions').classList.remove('hidden');
+    if(state!==cur){ state=cur; save(); render(); }
+  };
+  rd.readAsText(f);
+});
+$('keep-btn').addEventListener('click',()=>{ hideImportActions(); showWarn(null); });
+$('backup-btn').addEventListener('click',()=>{ exportFile(false); });
+$('replace-btn').addEventListener('click',()=>{
+  if(!pendingImport) return;
+  try{ if(state) localStorage.setItem('roundrobin-backup', JSON.stringify(state)); }catch(e){}
+  state=pendingImport; pendingImport=null;
+  $('import-actions').classList.add('hidden');
+  save(); showWarn('Imported the file. Your previous letter was also kept in this browser\'s local backup slot (supplementary only, not a recovery guarantee - use "Export current as backup" before replacing for a file copy).');
+  render();
+});
+$('entry-form').addEventListener('submit',ev=>{
+  ev.preventDefault();
+  const iss=currentIssue(); if(iss.sealed) return;
+  const who=$('entry-who').value, body=$('entry-body').value.trim();
+  if(!body) return;
+  const file=$('entry-photo').files[0];
+  const finish=photo=>{ iss.entries.push({who:who, body:body.slice(0,20000), photo:photo||null, at:new Date().toISOString()}); state.version++; $('entry-body').value=''; $('entry-photo').value=''; save(); render(); };
+  if(file){
+    const img=new Image(); const rd=new FileReader();
+    rd.onload=e=>{ img.onload=()=>{ const c=document.createElement('canvas'); const s=Math.min(1,800/Math.max(img.width,img.height)); c.width=img.width*s; c.height=img.height*s; c.getContext('2d').drawImage(img,0,0,c.width,c.height); finish(c.toDataURL('image/jpeg',0.7)); }; img.src=e.target.result; };
+    rd.readAsDataURL(file);
+  } else finish(null);
+});
+$('seal-btn').addEventListener('click',()=>{
+  const iss=currentIssue(); if(iss.sealed) return;
+  iss.sealed=true; iss.sealedAt=new Date().toISOString();
+  state.issues.push(newIssue()); state.version++; save(); render();
+});
+function exportFile(advanceTurn){
+  if(!state) return;
+  if(advanceTurn){ state.turn=(state.turn+1)%state.members.length; state.version++; }
+  save(); render();
+  $('roundrobin-data').textContent=embedJSON(state);
+  const html='<!DOCTYPE html>\n'+document.documentElement.outerHTML;
+  const blob=new Blob([html],{type:'text/html'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=(state.title.replace(/[^a-z0-9]+/gi,'-').toLowerCase()||'roundrobin-letter')+(advanceTurn?'':'-backup')+'.html';
+  a.click();
+}
+$('export-btn').addEventListener('click',()=>exportFile(true));
+$('new-btn').addEventListener('click',()=>{ state=null; save(); showWarn(null); hideImportActions(); render(); });
+(function boot(){
+  let embedded=null;
+  try{ embedded=JSON.parse($('roundrobin-data').textContent); }catch(e){}
+  if(validState(embedded)){ state=sanitizeState(embedded); }
+  else state=loadLocal();
+  render();
+})();
+})();
+</script>
+</body>
+</html>

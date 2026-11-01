@@ -99,6 +99,13 @@ footer{margin-top:36px;color:var(--muted);font-size:.8rem;text-align:center}
     <textarea id="entry-body" placeholder="Write as much or as little as you like. The group reads it when the letter reaches them." required></textarea>
     <label for="entry-photo">Optional photo (resized small, stored inside the file)</label>
     <input type="file" id="entry-photo" accept="image/*">
+    <label>Optional voice note (recorded on this device, stored inside the file)</label>
+    <div class="row" id="audio-row" style="margin-top:4px">
+      <button type="button" class="ghost" id="record-btn">Start recording</button>
+      <button type="button" class="ghost hidden" id="remove-audio-btn">Remove voice note</button>
+    </div>
+    <div id="audio-preview" style="margin-top:6px"></div>
+    <div id="audio-status" class="meta" role="status"></div>
     <button type="submit">Add entry</button>
   </form>
 
@@ -109,7 +116,7 @@ footer{margin-top:36px;color:var(--muted);font-size:.8rem;text-align:center}
   </div>
 </section>
 
-<footer>Roundrobin prototype v3.1 - experimental, device-local. Built for a private research cycle; not a launched product or validated platform.</footer>
+<footer>Roundrobin prototype v3.2 - experimental, device-local. Built for a private research cycle; not a launched product or validated platform.</footer>
 </div>
 
 <script id="roundrobin-data" type="application/json">null</script>
@@ -132,16 +139,17 @@ function validState(s){
     && Number.isInteger(s.turn) && Number.isInteger(s.version)
     && Array.isArray(s.issues) && s.issues.length>0 && s.issues.every(i=>i&&typeof i==='object'&&Array.isArray(i.entries)
        && i.entries.every(e=>e&&typeof e==='object'&&typeof e.who==='string'&&typeof e.body==='string'
-          &&(e.photo===null||typeof e.photo==='string')&&(typeof e.at==='string')));
+          &&(e.photo===null||typeof e.photo==='string')&&(e.audio===undefined||e.audio===null||typeof e.audio==='string')&&(typeof e.at==='string')));
 }
 // Only allow real raster data URLs as photos; anything else is dropped.
 function safePhoto(p){ return (typeof p==='string'&&/^data:image\/(png|jpeg|jpg|gif|webp);base64,/.test(p)&&p.length<8000000)?p:null; }
+function safeAudio(a){ return (typeof a==='string'&&/^data:audio\/(webm|mp4|ogg|mpeg|aac|wav);base64,/.test(a)&&a.length<5000000)?a:null; }
 function sanitizeState(s){
   if(typeof s.id!=='string') s.id=null;
   s.turn=((s.turn%s.members.length)+s.members.length)%s.members.length;
   if(s.version<1) s.version=1;
   s.issues.forEach(i=>{ i.sealed=!!i.sealed; i.sealedAt=i.sealed?String(i.sealedAt||''):null;
-    i.entries.forEach(e=>{ e.who=String(e.who).slice(0,80); e.body=String(e.body).slice(0,20000); e.photo=safePhoto(e.photo); e.at=String(e.at); }); });
+    i.entries.forEach(e=>{ e.who=String(e.who).slice(0,80); e.body=String(e.body).slice(0,20000); e.photo=safePhoto(e.photo); e.audio=safeAudio(e.audio); e.at=String(e.at); }); });
   return s;
 }
 function rid(){ try{ const a=new Uint32Array(2); crypto.getRandomValues(a); return 'L'+a[0].toString(36)+a[1].toString(36); }catch(e){ return 'L'+Math.random().toString(36).slice(2)+Date.now().toString(36); } }
@@ -174,6 +182,7 @@ function render(){
       const body=document.createElement('div'); body.className='body'; body.textContent=en.body;
       e.appendChild(who); e.appendChild(when); e.appendChild(body);
       if(en.photo){ const img=document.createElement('img'); img.src=en.photo; img.alt='photo from '+en.who; e.appendChild(img); }
+      if(en.audio){ const au=document.createElement('audio'); au.controls=true; au.src=en.audio; au.style.width='100%'; au.style.marginTop='8px'; e.appendChild(au); }
       div.appendChild(e);
     });
     box.appendChild(div);
@@ -248,13 +257,49 @@ $('replace-btn').addEventListener('click',()=>{
   save(); showWarn('Imported the file. Your previous letter was also kept in this browser\'s local backup slot (supplementary only, not a recovery guarantee - use "Export current as backup" before replacing for a file copy).');
   render();
 });
+let pendingAudio=null, mediaRec=null, mediaStream=null;
+function clearPendingAudio(){ pendingAudio=null; $('audio-preview').innerHTML=''; $('remove-audio-btn').classList.add('hidden'); }
+function setPendingAudio(dataUrl){
+  pendingAudio=dataUrl; $('audio-preview').innerHTML='';
+  const au=document.createElement('audio'); au.controls=true; au.src=dataUrl; au.style.width='100%';
+  $('audio-preview').appendChild(au); $('remove-audio-btn').classList.remove('hidden');
+}
+$('remove-audio-btn').addEventListener('click',clearPendingAudio);
+const recBtn=$('record-btn');
+if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia||!window.MediaRecorder){
+  recBtn.disabled=true; recBtn.textContent='Recording not supported in this browser';
+}
+function stopRecording(){
+  if(mediaRec&&mediaRec.state==='recording'){ mediaRec.stop(); return true; }
+  if(mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); mediaStream=null; recBtn.textContent='Start recording'; }
+  return false;
+}
+window.addEventListener('pagehide',()=>{ if(mediaStream) mediaStream.getTracks().forEach(t=>t.stop()); });
+recBtn.addEventListener('click',async ()=>{
+  if(stopRecording()) return;
+  try{
+    mediaStream=await navigator.mediaDevices.getUserMedia({audio:true});
+    const chunks=[]; mediaRec=new MediaRecorder(mediaStream);
+    mediaRec.ondataavailable=e=>{ if(e.data.size) chunks.push(e.data); };
+    mediaRec.onstop=()=>{
+      if(mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); mediaStream=null; }
+      recBtn.textContent='Start recording';
+      const blob=new Blob(chunks,{type:mediaRec.mimeType||'audio/webm'});
+      if(blob.size>3500000){ $('audio-status').textContent='Voice note too long (over about 2-3 minutes). Record a shorter one.'; return; }
+      $('audio-status').textContent='';
+      const rd=new FileReader(); rd.onload=e=>setPendingAudio(e.target.result); rd.readAsDataURL(blob);
+    };
+    mediaRec.start(); recBtn.textContent='Stop recording';
+    setTimeout(()=>{ if(mediaRec&&mediaRec.state==='recording') mediaRec.stop(); }, 180000);
+  }catch(e){ $('audio-status').textContent='Microphone unavailable: '+(e&&e.name==='NotAllowedError'?'permission denied':(e&&e.message?e.message:'device issue')); }
+});
 $('entry-form').addEventListener('submit',ev=>{
   ev.preventDefault();
   const iss=currentIssue(); if(iss.sealed) return;
   const who=$('entry-who').value, body=$('entry-body').value.trim();
   if(!body) return;
   const file=$('entry-photo').files[0];
-  const finish=photo=>{ iss.entries.push({who:who, body:body.slice(0,20000), photo:photo||null, at:new Date().toISOString()}); state.version++; $('entry-body').value=''; $('entry-photo').value=''; save(); render(); };
+  const finish=photo=>{ iss.entries.push({who:who, body:body.slice(0,20000), photo:photo||null, audio:pendingAudio||null, at:new Date().toISOString()}); state.version++; $('entry-body').value=''; $('entry-photo').value=''; clearPendingAudio(); save(); render(); };
   if(file){
     const img=new Image(); const rd=new FileReader();
     rd.onload=e=>{ img.onload=()=>{ const c=document.createElement('canvas'); const s=Math.min(1,800/Math.max(img.width,img.height)); c.width=img.width*s; c.height=img.height*s; c.getContext('2d').drawImage(img,0,0,c.width,c.height); finish(c.toDataURL('image/jpeg',0.7)); }; img.src=e.target.result; };
@@ -278,7 +323,7 @@ function exportFile(advanceTurn){
   a.click();
 }
 $('export-btn').addEventListener('click',()=>exportFile(true));
-$('new-btn').addEventListener('click',()=>{ state=null; save(); showWarn(null); hideImportActions(); render(); });
+$('new-btn').addEventListener('click',()=>{ stopRecording(); state=null; save(); showWarn(null); hideImportActions(); render(); });
 (function boot(){
   let embedded=null;
   try{ embedded=JSON.parse($('roundrobin-data').textContent); }catch(e){}
